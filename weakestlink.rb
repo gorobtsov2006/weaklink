@@ -1,5 +1,6 @@
 require 'timeout'
 
+# Функция для чтения файла и парсинга строк
 def read_file(filename)
   return [] unless File.exist?(filename)
   File.readlines(filename, chomp: true).map { |line| line.split('|') }
@@ -8,84 +9,152 @@ rescue Errno::ENOENT
   []
 end
 
+# Функция для получения случайного комментария с цветной подсветкой
+def get_comment(comments, type)
+  comment = comments.select { |c| c[0] == type }.sample[1]
+  color = type == 'correct' ? "\e[32m" : "\e[31m" # Зеленый для correct, красный для error
+  "#{color}#{comment}\e[0m" # Сброс цвета после комментария
+end
+
+# Функция для ответа бота с учетом сложности
+def bot_answer(correct_answer, difficulty)
+  probability = case difficulty
+                when 'легкая' then 0.5
+                when 'средняя' then 0.7
+                when 'тяжелая' then 0.9
+                else 0.7 # Средняя по умолчанию
+                end
+  rand < probability ? correct_answer : ('A'..'Z').to_a.sample(5).join.downcase
+end
+
+# Загрузка данных
 questions = read_file('questions.txt')
 bonus_questions = read_file('bonus_questions.txt')
 comments = read_file('comments.txt')
-hints = read_file('hints.txt').to_h
 
-if questions.empty?  bonus_questions.empty?  comments.empty?
+# Проверка наличия данных
+if questions.empty? || bonus_questions.empty? || comments.empty?
   puts "Не удалось загрузить данные. Проверьте файлы questions.txt, bonus_questions.txt и comments.txt."
   exit
 end
 
-score = 0
-chain = [10, 20, 40, 80, 160, 320, 640, 1280]
-chain_index = 0
-bot_score = 0
+# Инициализация массивов для отслеживания использованных вопросов
+used_questions = []
+used_bonus_questions = []
 
-def get_comment(comments, type)
-  comments.select { |c| c[0] == type }.sample[1]
+# Выбор сложности бота
+puts "Выберите сложность бота (легкая, средняя, тяжелая):"
+difficulty = gets.chomp.downcase
+until %w[легкая средняя тяжелая].include?(difficulty)
+  puts "Неверный выбор. Введите легкая, средняя или тяжелая:"
+  difficulty = gets.chomp.downcase
 end
+puts "Вы выбрали сложность: #{difficulty}"
 
-def bot_answer(correct_answer)
-  rand < 0.7 ? correct_answer : (('A'..'Z').to_a.sample(5).join.downcase)
-end
+# Установка времени ответа в зависимости от сложности
+answer_time = { 'легкая' => 20, 'средняя' => 15, 'тяжелая' => 10 }
+puts "Время на ответ: #{answer_time[difficulty]} сек"
 
-puts "Добро пожаловать в 'Слабое звено'! Отвечай на вопросы, соревнуйся с ботом и забирай очки, пока не поздно!"
+# Инициализация игры
+total_score = 0      # Общий счет игрока
+bot_score = 0        # Счет бота
+chain_count = 0      # Количество правильных ответов в текущей цепочке
+chain_score = 0      # Очки текущей цепочки
+win_score = 500      # Цель игры
+
+puts "\nДобро пожаловать в 'Слабое звено'! Набери #{win_score} очков раньше бота, чтобы выиграть!"
 
 loop do
-  is_bonus = rand < 0.1
-  question_set = is_bonus ? bonus_questions : questions
-  question = question_set.sample
-  puts "\n#{is_bonus ? 'БОНУСНЫЙ ВОПРОС (про Ruby):' : 'Вопрос:'} #{question[0]}"
+  # Проверка условия победы
+  if total_score >= win_score || bot_score >= win_score
+    puts "\nИтоговый счет: Вы - #{total_score}, Бот - #{bot_score}"
+    puts total_score >= win_score && total_score > bot_score ? "Вы выиграли!" : "Бот выиграл!"
+    break
+  end
 
-  unless is_bonus
-    puts "Нужна подсказка? (y/n)"
-    if gets.chomp.downcase == 'y'
-      hint = hints[question[0]]
-      puts "Подсказка: #{hint || 'Нет подсказки для этого вопроса'}"
+  # Решение о сохранении банка (без таймера)
+  if chain_score > 0
+    loop do
+      puts "\nЗабрать очки текущей цепочки (#{chain_score})? (да/нет)"
+      take_score = gets.chomp.downcase
+      if take_score == 'да'
+        total_score += chain_score
+        puts "Вы забрали #{chain_score} очков!"
+        puts "\e[34mОбщий счет: Вы - #{total_score} / Бот - #{bot_score}\e[0m"
+        chain_count = 0
+        chain_score = 0
+        break
+      elsif take_score == 'нет'
+        puts "Цепочка сохранена, продолжаем!"
+        break
+      else
+        puts "Неверный ввод. Введите да или нет."
+      end
     end
   end
 
+  # Выбор типа вопроса: обычный или бонусный (10% шанс на бонусный)
+  is_bonus = rand < 0.1
+  question_set = is_bonus ? bonus_questions - used_bonus_questions : questions - used_questions
+
+  # Проверка на наличие доступных вопросов
+  if question_set.empty?
+    puts "\nВопросы #{is_bonus ? 'бонусные' : 'обычные'} закончились! Игра завершена."
+    puts "Итоговый счет: Вы - #{total_score}, Бот - #{bot_score}"
+    puts total_score > bot_score ? "Вы выиграли!" : "Бот выиграл!"
+    break
+  end
+
+  question = question_set.sample
+  # Добавление вопроса в использованные
+  if is_bonus
+    used_bonus_questions << question
+  else
+    used_questions << question
+  end
+
+  puts "\n#{is_bonus ? "\e[33mБОНУСНЫЙ ВОПРОС (про Ruby, x2 очки): #{question[0]}\e[0m" : "\e[33mВопрос: #{question[0]}\e[0m"}"
+
+  # Ответ игрока с таймером (зависит от сложности)
   player_answer = nil
   begin
-    Timeout.timeout(10) do
+    Timeout.timeout(answer_time[difficulty]) do
       print "Ваш ответ: "
       player_answer = gets.chomp.downcase
     end
   rescue Timeout::Error
-    chain_index = 0
+    chain_count = 0
+    chain_score = 0
     comment = get_comment(comments, 'error')
-    puts "Время вышло! #{comment}"
+    puts "\n\e[31mВремя вышло!\e[0m #{comment} Цепочка сброшена."
   end
 
-  bot_ans = bot_answer(question[1].downcase)
-  puts "Бот ответил: #{bot_ans}"
-
+  # Проверка ответа игрока
   if player_answer
     if player_answer == question[1].downcase
-      points = is_bonus ? chain[chain_index] * 2 : chain[chain_index]
-      score += points
-      chain_index = [chain_index + 1, chain.length - 1].min
+      chain_count += 1
+      points = 10 * (2 ** (chain_count - 1)) # 10, 20, 40, 80, ...
+      points *= 2 if is_bonus # Бонусные вопросы дают x2 очки
+      chain_score += points
       comment = get_comment(comments, 'correct')
-      puts "Правильно! #{comment} Очки: #{score}"
+      puts "\e[32mПравильно!\e[0m #{comment} (Очки за цепочку: #{chain_score})"
+      puts "Очки в банке: #{total_score}"
     else
-      chain_index = 0
+      chain_count = 0
+      chain_score = 0
       comment = get_comment(comments, 'error')
-      puts "Неправильно. #{comment} Ответ: #{question[1]}"
+      puts "\e[31mНеправильно.\e[0m #{comment} Ответ: #{question[1]} Цепочка сброшена."
     end
   end
 
-  if bot_ans == question[1].downcase
-    bot_score += chain[chain_index]
-    puts "Бот ответил правильно! Его очки: #{bot_score}"
+  # Ответ бота
+  bot_answer = bot_answer(question[1].downcase, difficulty)
+  puts "\e[90mБот ответил: #{bot_answer}\e[0m"
+  if bot_answer == question[1].downcase
+    bot_points = points || 0 # Бот получает те же очки, что и игрок за этот вопрос
+    bot_score += bot_points
+    puts "\e[90mБот ответил правильно! Его очки: #{bot_score}\e[0m"
   else
-    puts "Бот ответил неправильно."
+    puts "\e[90mБот ответил неправильно.\e[0m"
   end
-
-  puts "\nЗабрать очки? (y/n)"
-  break if gets.chomp.downcase == 'y'
 end
-
-puts "\nИтоговый счет: Вы - #{score}, Бот - #{bot_score}"
-puts score > bot_score ? "Вы выиграли!" : "Бот выиграл!"
