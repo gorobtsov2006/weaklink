@@ -12,17 +12,17 @@ end
 # Функция для получения случайного комментария с цветной подсветкой
 def get_comment(comments, type)
   comment = comments.select { |c| c[0] == type }.sample[1]
-  color = type == 'correct' ? "\e[32m" : "\e[31m" # Зеленый для correct, красный для error
-  "#{color}#{comment}\e[0m" # Сброс цвета после комментария
+  color = type == 'correct' ? "\e[32m" : "\e[31m" 
+  "#{color}#{comment}\e[0m"
 end
 
 # Функция для ответа бота с учетом сложности
 def bot_answer(correct_answer, difficulty)
   probability = case difficulty
                 when 'легкая' then 0.5
-                when 'средняя' then 0.7
-                when 'тяжелая' then 0.9
-                else 0.7 # Средняя по умолчанию
+                when 'средняя' then 0.65
+                when 'тяжелая' then 0.8
+                else 0.7 
                 end
   rand < probability ? correct_answer : ('A'..'Z').to_a.sample(5).join.downcase
 end
@@ -52,7 +52,7 @@ end
 puts "Вы выбрали сложность: #{difficulty}"
 
 # Установка времени ответа в зависимости от сложности
-answer_time = { 'легкая' => 20, 'средняя' => 15, 'тяжелая' => 10 }
+answer_time = { 'легкая' => 25, 'средняя' => 20, 'тяжелая' => 15 }
 puts "Время на ответ: #{answer_time[difficulty]} сек"
 
 # Инициализация игры
@@ -67,12 +67,12 @@ puts "\nДобро пожаловать в 'Слабое звено'! Набер
 loop do
   # Проверка условия победы
   if total_score >= win_score || bot_score >= win_score
-    puts "\nИтоговый счет: Вы - #{total_score}, Бот - #{bot_score}"
-    puts total_score >= win_score && total_score > bot_score ? "Вы выиграли!" : "Бот выиграл!"
+    puts "\n\e[34mИтоговый счет: Вы - #{total_score} / Бот - #{bot_score}\e[0m"
+    puts "\e[32m#{total_score >= win_score && total_score > bot_score ? 'Вы выиграли!' : 'Бот выиграл!'}\e[0m"
     break
   end
 
-  # Решение о сохранении банка (без таймера)
+  # Решение о сохранении банка
   if chain_score > 0
     loop do
       puts "\nЗабрать очки текущей цепочки (#{chain_score})? (да/нет)"
@@ -93,15 +93,15 @@ loop do
     end
   end
 
-  # Выбор типа вопроса: обычный или бонусный (10% шанс на бонусный)
+  # Выбор типа вопроса: обычный или бонусный
   is_bonus = rand < 0.1
   question_set = is_bonus ? bonus_questions - used_bonus_questions : questions - used_questions
 
   # Проверка на наличие доступных вопросов
   if question_set.empty?
     puts "\nВопросы #{is_bonus ? 'бонусные' : 'обычные'} закончились! Игра завершена."
-    puts "Итоговый счет: Вы - #{total_score}, Бот - #{bot_score}"
-    puts total_score > bot_score ? "Вы выиграли!" : "Бот выиграл!"
+    puts "\e[34mИтоговый счет: Вы - #{total_score} / Бот - #{bot_score}\e[0m"
+    puts "\e[32m#{total_score > bot_score ? 'Вы выиграли!' : 'Бот выиграл!'}\e[0m"
     break
   end
 
@@ -115,7 +115,7 @@ loop do
 
   puts "\n#{is_bonus ? "\e[33mБОНУСНЫЙ ВОПРОС (про Ruby, x2 очки): #{question[0]}\e[0m" : "\e[33mВопрос: #{question[0]}\e[0m"}"
 
-  # Ответ игрока с таймером (зависит от сложности)
+  # Ответ игрока с таймером
   player_answer = nil
   begin
     Timeout.timeout(answer_time[difficulty]) do
@@ -126,15 +126,26 @@ loop do
     chain_count = 0
     chain_score = 0
     comment = get_comment(comments, 'error')
-    puts "\n\e[31mВремя вышло!\e[0m #{comment} Цепочка сброшена."
+    puts "\n\e[31mВремя вышло!\e[0m #{comment}"
+    puts "(Цепочка сброшена.)"
   end
+
+  # Проверка команды stop
+  if player_answer == 'stop'
+    puts "\nИгра завершена по вашей команде."
+    puts "\e[34mИтоговый счет: Вы - #{total_score} / Бот - #{bot_score}\e[0m"
+    puts "\e[32m#{total_score > bot_score ? 'Вы выиграли!' : 'Бот выиграл!'}\e[0m"
+    break
+  end
+
+  # Вычисление очков за вопрос
+  points = chain_count.zero? ? 10 : 10 * (2 ** (chain_count - 1))
+  points *= 2 if is_bonus 
 
   # Проверка ответа игрока
   if player_answer
-    if player_answer == question[1].downcase
+    if player_answer == question[1].strip.downcase
       chain_count += 1
-      points = 10 * (2 ** (chain_count - 1)) # 10, 20, 40, 80, ...
-      points *= 2 if is_bonus # Бонусные вопросы дают x2 очки
       chain_score += points
       comment = get_comment(comments, 'correct')
       puts "\e[32mПравильно!\e[0m #{comment} (Очки за цепочку: #{chain_score})"
@@ -143,16 +154,17 @@ loop do
       chain_count = 0
       chain_score = 0
       comment = get_comment(comments, 'error')
-      puts "\e[31mНеправильно.\e[0m #{comment} Ответ: #{question[1]} Цепочка сброшена."
+      puts "\e[31mНеправильно.\e[0m #{comment}"
+      puts "\e[36mОтвет: #{question[1]}\e[0m"
+      puts "(Цепочка сброшена.)"
     end
   end
 
   # Ответ бота
-  bot_answer = bot_answer(question[1].downcase, difficulty)
+  bot_answer = bot_answer(question[1].strip.downcase, difficulty)
   puts "\e[90mБот ответил: #{bot_answer}\e[0m"
-  if bot_answer == question[1].downcase
-    bot_points = points || 0 # Бот получает те же очки, что и игрок за этот вопрос
-    bot_score += bot_points
+  if bot_answer == question[1].strip.downcase
+    bot_score += points
     puts "\e[90mБот ответил правильно! Его очки: #{bot_score}\e[0m"
   else
     puts "\e[90mБот ответил неправильно.\e[0m"
