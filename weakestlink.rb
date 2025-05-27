@@ -12,19 +12,14 @@ end
 # Функция для получения случайного комментария с цветной подсветкой
 def get_comment(comments, type)
   comment = comments.select { |c| c[0] == type }.sample[1]
-  color = type == 'correct' ? "\e[32m" : "\e[31m" 
-  "#{color}#{comment}\e[0m"
+  color = type == 'correct' ? "\e[32m" : "\e[31m" # Зеленый для correct, красный для error
+  "#{color}#{comment}\e[0m" # Сброс цвета после комментария
 end
 
-# Функция для ответа бота с учетом сложности
-def bot_answer(correct_answer, difficulty)
-  probability = case difficulty
-                when 'легкая' then 0.5
-                when 'средняя' then 0.65
-                when 'тяжелая' then 0.8
-                else 0.7 
-                end
-  rand < probability ? correct_answer : ('A'..'Z').to_a.sample(5).join.downcase
+# Функция для ответа бота с учетом сложности (конечный автомат)
+def bot_answer(correct_answer, difficulty, bot_state, bot_patterns)
+  should_be_correct = bot_patterns[difficulty][bot_state]
+  should_be_correct ? correct_answer : ('A'..'Z').to_a.sample(5).join.downcase
 end
 
 # Загрузка данных
@@ -42,6 +37,13 @@ end
 used_questions = []
 used_bonus_questions = []
 
+# Шаблоны ответов бота
+bot_patterns = {
+  'легкая' => [true, false, false], 
+  'средняя' => [true, true, false], 
+  'тяжелая' => [true, true, true, false] 
+}
+
 # Выбор сложности бота
 puts "Выберите сложность бота (легкая, средняя, тяжелая):"
 difficulty = gets.chomp.downcase
@@ -52,7 +54,7 @@ end
 puts "Вы выбрали сложность: #{difficulty}"
 
 # Установка времени ответа в зависимости от сложности
-answer_time = { 'легкая' => 25, 'средняя' => 20, 'тяжелая' => 15 }
+answer_time = { 'легкая' => 20, 'средняя' => 15, 'тяжелая' => 10 }
 puts "Время на ответ: #{answer_time[difficulty]} сек"
 
 # Инициализация игры
@@ -61,6 +63,7 @@ bot_score = 0        # Счет бота
 chain_count = 0      # Количество правильных ответов в текущей цепочке
 chain_score = 0      # Очки текущей цепочки
 win_score = 500      # Цель игры
+bot_state = 0        # Текущее состояние бота в цикле ответов
 
 puts "\nДобро пожаловать в 'Слабое звено'! Набери #{win_score} очков раньше бота, чтобы выиграть!"
 
@@ -72,7 +75,7 @@ loop do
     break
   end
 
-  # Решение о сохранении банка
+  # Решение о сохранении банка (без таймера)
   if chain_score > 0
     loop do
       puts "\nЗабрать очки текущей цепочки (#{chain_score})? (да/нет)"
@@ -93,7 +96,7 @@ loop do
     end
   end
 
-  # Выбор типа вопроса: обычный или бонусный
+  # Выбор типа вопроса: обычный или бонусный (10% шанс на бонусный)
   is_bonus = rand < 0.1
   question_set = is_bonus ? bonus_questions - used_bonus_questions : questions - used_questions
 
@@ -115,7 +118,7 @@ loop do
 
   puts "\n#{is_bonus ? "\e[33mБОНУСНЫЙ ВОПРОС (про Ruby, x2 очки): #{question[0]}\e[0m" : "\e[33mВопрос: #{question[0]}\e[0m"}"
 
-  # Ответ игрока с таймером
+  # Ответ игрока с таймером (зависит от сложности)
   player_answer = nil
   begin
     Timeout.timeout(answer_time[difficulty]) do
@@ -139,8 +142,8 @@ loop do
   end
 
   # Вычисление очков за вопрос
-  points = chain_count.zero? ? 10 : 10 * (2 ** (chain_count - 1))
-  points *= 2 if is_bonus 
+  points = chain_count.zero? ? 10 : 10 * (2 ** (chain_count - 1)) # 10, 20, 40, 80, ...
+  points *= 2 if is_bonus # Бонусные вопросы дают x2 очки
 
   # Проверка ответа игрока
   if player_answer
@@ -161,7 +164,7 @@ loop do
   end
 
   # Ответ бота
-  bot_answer = bot_answer(question[1].strip.downcase, difficulty)
+  bot_answer = bot_answer(question[1].strip.downcase, difficulty, bot_state, bot_patterns)
   puts "\e[90mБот ответил: #{bot_answer}\e[0m"
   if bot_answer == question[1].strip.downcase
     bot_score += points
@@ -169,4 +172,7 @@ loop do
   else
     puts "\e[90mБот ответил неправильно.\e[0m"
   end
+
+  # Обновление состояния бота
+  bot_state = (bot_state + 1) % bot_patterns[difficulty].length
 end
